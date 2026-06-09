@@ -268,6 +268,80 @@
   line-height: 1.5;
 }
 
+.assignments-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.assignment-sidebar {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-card {
+  border: 1px solid #d9e2ec;
+  background: #fff;
+  border-radius: 16px;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  box-shadow: 0 10px 24px rgba(16, 49, 73, 0.06);
+}
+
+.assignment-card strong,
+.assignment-card span,
+.assignment-card small {
+  display: block;
+}
+
+.assignment-card span {
+  color: #526a85;
+  font-size: 0.92rem;
+}
+
+.assignment-card small {
+  color: #7a868f;
+  font-size: 0.82rem;
+}
+
+.assignment-card.active {
+  border-color: #20639b;
+  background: #edf5ff;
+}
+
+.assignment-detail {
+  background: #f8fbff;
+  border: 1px solid #d9e2ec;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.assignment-patient-list {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-patient-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #d9e2ec;
+  background: #fff;
+}
+
+@media (max-width: 980px) {
+  .assignments-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .card-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

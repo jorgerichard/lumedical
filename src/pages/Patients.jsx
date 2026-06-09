@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getPatients, getProfessionals, getAppointments, createPatient, updatePatient, deletePatient, searchPatients, createAppointment, getAssignedPatientsByProfessional } from '../services/api';
 import PatientProfessionalManager from '../components/PatientProfessionalManager';
+import PatientModal from '../components/PatientModal';
+import ProfessionalAssignmentsPanel from '../components/ProfessionalAssignmentsPanel';
 import './Pages.css';
 
 const formatPhoneInput = (value) => value.replace(/\D/g, '').slice(0, 9);
@@ -74,10 +76,13 @@ export default function Patients() {
   const [categoryFilter, setCategoryFilter] = useState('todo');
   const [professionalAssignments, setProfessionalAssignments] = useState([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [selectedAssignmentProfessionalId, setSelectedAssignmentProfessionalId] = useState('');
   const [schedulingPatient, setSchedulingPatient] = useState(null);
   const [appointmentForm, setAppointmentForm] = useState({ professionalId: '', appointmentDate: '', appointmentTime: '', reason: '' });
   const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
   const [managingPatient, setManagingPatient] = useState(null);
+  const [activeTab, setActiveTab] = useState('patients');
   const [previousCategoryFilter, setPreviousCategoryFilter] = useState('todo');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 5;
@@ -98,6 +103,45 @@ export default function Patients() {
 
   const { user } = useAuth();
 
+  const fetchProfessionalAssignments = useCallback(async () => {
+    let visibleProfessionals = professionals.filter((p) =>
+      categoryFilter === 'todo' || normalizeText(p.role) === normalizeText(categoryFilter)
+    );
+
+    if (user && user.role && user.role !== 'admin') {
+      visibleProfessionals = visibleProfessionals.filter((p) => p.userId === user.id);
+    }
+
+    if (visibleProfessionals.length === 0) {
+      setProfessionalAssignments([]);
+      return;
+    }
+
+    setAssignmentsLoading(true);
+    try {
+      const assignmentResults = await Promise.all(
+        visibleProfessionals.map(async (professional) => {
+          try {
+            const res = await getAssignedPatientsByProfessional(professional.id);
+            return {
+              professional,
+              patients: Array.isArray(res.data) ? res.data : []
+            };
+          } catch (err) {
+            console.error(`Error obteniendo pacientes para ${professional.firstName}:`, err);
+            return { professional, patients: [] };
+          }
+        })
+      );
+      setProfessionalAssignments(assignmentResults);
+    } catch (err) {
+      console.error('Error al cargar asignaciones de profesionales:', err.response?.data || err.message);
+      setProfessionalAssignments([]);
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }, [categoryFilter, professionals, user]);
+
   // When user changes or loads, reset filter to user's role if not admin
   useEffect(() => {
     if (user && user.role && user.role !== 'admin') {
@@ -110,7 +154,19 @@ export default function Patients() {
     if (professionals.length > 0) {
       fetchProfessionalAssignments();
     }
-  }, [professionals, categoryFilter, user]);
+  }, [professionals, categoryFilter, user, fetchProfessionalAssignments]);
+
+  useEffect(() => {
+    if (!professionalAssignments.length) {
+      setSelectedAssignmentProfessionalId('');
+      return;
+    }
+
+    const stillExists = professionalAssignments.some((item) => item.professional.id === selectedAssignmentProfessionalId);
+    if (!stillExists) {
+      setSelectedAssignmentProfessionalId(professionalAssignments[0].professional.id);
+    }
+  }, [professionalAssignments, selectedAssignmentProfessionalId]);
 
   const fetchProfessionals = async () => {
     try {
@@ -153,53 +209,6 @@ export default function Patients() {
       setAppointments(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Error al cargar citas:', err.response?.data || err.message);
-    }
-  };
-
-  const fetchProfessionalAssignments = async () => {
-    let visibleProfessionals = professionals.filter((p) =>
-      categoryFilter === 'todo' || normalizeText(p.role) === normalizeText(categoryFilter)
-    );
-
-    // If the logged-in user is not admin, only show assignments for the logged-in professional
-    if (user && user.role && user.role !== 'admin') {
-      visibleProfessionals = visibleProfessionals.filter((p) => p.userId === user.id);
-    }
-
-    console.log('fetchProfessionalAssignments: user.id:', user?.id, 'visibleProfessionals:', visibleProfessionals);
-
-    if (visibleProfessionals.length === 0) {
-      setProfessionalAssignments([]);
-      return;
-    }
-
-    setAssignmentsLoading(true);
-    try {
-      const assignmentResults = await Promise.all(
-        visibleProfessionals.map(async (professional) => {
-          try {
-            const res = await getAssignedPatientsByProfessional(professional.id);
-            console.log(`Pacientes asignados a ${professional.firstName} ${professional.lastName}:`, res.data);
-            return {
-              professional,
-              patients: Array.isArray(res.data) ? res.data : []
-            };
-          } catch (err) {
-            console.error(`Error obteniendo pacientes para ${professional.firstName}:`, err);
-            return {
-              professional,
-              patients: []
-            };
-          }
-        })
-      );
-      console.log('assignmentResults:', assignmentResults);
-      setProfessionalAssignments(assignmentResults);
-    } catch (err) {
-      console.error('Error al cargar asignaciones de profesionales:', err.response?.data || err.message);
-      setProfessionalAssignments([]);
-    } finally {
-      setAssignmentsLoading(false);
     }
   };
 
@@ -435,23 +444,20 @@ export default function Patients() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>👥 Gestión de Pacientes</h2>
+        <div>
+          <h2>👥 Gestión de Pacientes</h2>
+          <p style={{ margin: '6px 0 0', color: '#526a85' }}>Divide la gestión en pestañas para evitar saturar la vista y centrarte en cada tarea.</p>
+        </div>
         {user && user.role === 'admin' && (
-          <button onClick={() => { resetForm(); setShowForm(!showForm); }} className="btn-primary">
-            {showForm ? 'Cancelar' : editing ? 'Editar Paciente' : '+ Nuevo Paciente'}
+          <button onClick={() => { resetForm(); setShowForm(true); }} className="btn-primary">
+            + Nuevo Paciente
           </button>
         )}
       </div>
 
-      <div className="search-bar">
-        <input
-          type="text"
-          placeholder="Buscar paciente..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-        />
-        <button type="button" onClick={handleSearch}>Buscar</button>
+      <div className="tab-switcher" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
+        <button type="button" className={activeTab === 'patients' ? 'btn-primary' : 'btn-secondary'} onClick={() => setActiveTab('patients')}>Listado de pacientes</button>
+        <button type="button" className={activeTab === 'assignments' ? 'btn-primary' : 'btn-secondary'} onClick={() => setActiveTab('assignments')}>Asignaciones</button>
       </div>
 
       <div className="schedule-summary" style={{ marginBottom: '20px' }}>
@@ -494,42 +500,98 @@ export default function Patients() {
         )}
       </div>
 
-      <div className="schedule-summary" style={{ marginBottom: '20px' }}>
-        <div className="page-header" style={{ alignItems: 'flex-start' }}>
-          <div>
-            <h3>Asignaciones de profesionales</h3>
-            <p style={{ marginTop: '6px', color: '#526a85' }}>Muestra qué pacientes están asignados a cada profesional según categoría.</p>
+      {activeTab === 'patients' && (
+        <>
+          <div className="search-bar">
+            <input
+              type="text"
+              placeholder="Buscar paciente..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            />
+            <button type="button" onClick={handleSearch}>Buscar</button>
           </div>
-          <div>
-            <p style={{ margin: 0, color: '#7a868f', fontSize: '0.9rem' }}>Las asignaciones existen aunque no haya una cita agendada.</p>
-          </div>
-        </div>
 
-        {assignmentsLoading ? (
-          <div className="calendar-empty">Cargando asignaciones...</div>
-        ) : professionalAssignments.length > 0 ? (
-          professionalAssignments.map(({ professional, patients }) => (
-            <div key={professional.id} className="calendar-group" style={{ marginBottom: '16px' }}>
-              <h4>{professional.firstName} {professional.lastName} – {professional.role || 'Sin categoría'}</h4>
-              {patients.length > 0 ? (
-                patients.map((patient) => (
-                  <div key={patient.id} className="calendar-list-item" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #eee' }}>
-                    <div>
-                      <strong>{patient.firstName} {patient.lastName}</strong>
-                      <div style={{ fontSize: '0.95rem', color: '#555' }}>{patient.rut || patient.id}</div>
-                    </div>
-                    <span>{patient.phone || 'Sin teléfono'}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="calendar-empty">No hay pacientes asignados a este profesional.</div>
-              )}
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Número</th>
+                <th>Nombre</th>
+                <th>Apellido</th>
+                <th>Fecha Nacimiento</th>
+                <th>Creado</th>
+                <th>Teléfono</th>
+                <th>Dirección</th>
+                <th>Ciudad</th>
+                <th>Comuna</th>
+                <th>Profesionales asignados</th>
+                {user && user.role === 'admin' && <th>Acciones</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedPatients.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.rut}</td>
+                  <td>{p.firstName}</td>
+                  <td>{p.lastName}</td>
+                  <td>{formatDate(p.birthDate)}</td>
+                  <td>{formatDate(p.createdAt)}</td>
+                  <td>{p.phone}</td>
+                  <td>{p.address}</td>
+                  <td>{p.city}</td>
+                  <td>{p.comuna || p.state || ''}</td>
+                  <td>
+                    {assignedProfessionalsByPatient[p.id]?.length > 0 ? (
+                      assignedProfessionalsByPatient[p.id].map((professional) => (
+                        <div key={professional.id} style={{ fontSize: '0.85rem', marginBottom: '4px' }}>
+                          {professional.firstName} {professional.lastName} ({professional.role || 'Sin categoría'})
+                        </div>
+                      ))
+                    ) : (
+                      <span style={{ color: '#777', fontSize: '0.85rem' }}>Sin asignaciones</span>
+                    )}
+                  </td>
+                  {user && user.role === 'admin' && (
+                    <td>
+                      <>
+                        <button className="btn-secondary" onClick={() => startScheduling(p)}>Agendar</button>
+                        <button className="btn-primary" onClick={() => openProfessionalManager(p)}>Profesionales</button>
+                        <button className="btn-primary" onClick={() => handleEdit(p)}>Editar</button>
+                        <button className="btn-danger" onClick={() => handleDelete(p.id)}>Eliminar</button>
+                      </>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '12px' }}>
+            <span style={{ color: '#526a85', fontSize: '0.95rem' }}>
+              Mostrando {Math.min((currentPage - 1) * PAGE_SIZE + 1, patients.length)}-{Math.min(currentPage * PAGE_SIZE, patients.length)} de {patients.length} pacientes
+            </span>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))} disabled={currentPage === 1}>Anterior</button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                <button key={page} type="button" className={page === currentPage ? 'btn-primary' : 'btn-secondary'} onClick={() => setCurrentPage(page)} style={{ minWidth: '42px' }}>{page}</button>
+              ))}
+              <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Siguiente</button>
             </div>
-          ))
-        ) : (
-          <div className="calendar-empty">No hay asignaciones para esta categoría.</div>
-        )}
-      </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'assignments' && (
+        <ProfessionalAssignmentsPanel
+          assignments={professionalAssignments}
+          loading={assignmentsLoading}
+          searchTerm={assignmentSearch}
+          onSearchChange={setAssignmentSearch}
+          selectedProfessionalId={selectedAssignmentProfessionalId}
+          onSelectProfessional={setSelectedAssignmentProfessionalId}
+        />
+      )}
 
       {schedulingPatient && (
         <div className="modal-overlay" onClick={cancelScheduling} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
@@ -640,219 +702,18 @@ export default function Patients() {
         </div>
       )}
 
-      {showForm && (
-        <form onSubmit={handleSubmit} className="form-container">
-          <input
-            type="text"
-            placeholder="RUT del paciente"
-            inputMode="numeric"
-            maxLength={12}
-            value={form.rut}
-            onChange={(e) => setForm({ ...form, rut: formatRutInput(e.target.value) })}
-            required
-          />
-          <input
-            type="text"
-            placeholder="Nombre"
-            value={form.firstName}
-            onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-            required
-          />
-          <input
-            type="text"
-            placeholder="Apellido"
-            value={form.lastName}
-            onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-            required
-          />
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '10px',
-            marginBottom: '15px'
-          }}>
-            <div>
-              <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '5px' }}>Año</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="AAAA"
-                maxLength={4}
-                value={form.birthYear}
-                onChange={(e) => setForm({ ...form, birthYear: e.target.value.replace(/\D/g, '').slice(0, 4) })}
-                required
-                style={{ width: '100%', minWidth: '0' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '5px' }}>Mes</label>
-              <select
-                value={form.birthMonth}
-                onChange={(e) => setForm({ ...form, birthMonth: e.target.value })}
-                required
-                style={{ width: '100%', padding: '8px' }}
-              >
-                <option value="">Seleccionar mes</option>
-                <option value="01">Enero</option>
-                <option value="02">Febrero</option>
-                <option value="03">Marzo</option>
-                <option value="04">Abril</option>
-                <option value="05">Mayo</option>
-                <option value="06">Junio</option>
-                <option value="07">Julio</option>
-                <option value="08">Agosto</option>
-                <option value="09">Septiembre</option>
-                <option value="10">Octubre</option>
-                <option value="11">Noviembre</option>
-                <option value="12">Diciembre</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '5px' }}>Día</label>
-              <input
-                type="number"
-                placeholder="DD"
-                min="1"
-                max="31"
-                value={form.birthDay}
-                onChange={(e) => setForm({ ...form, birthDay: e.target.value })}
-                required
-                style={{ width: '100%' }}
-              />
-            </div>
-          </div>
-          <input
-            type="tel"
-            placeholder="Teléfono (9 dígitos)"
-            inputMode="numeric"
-            maxLength={9}
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: formatPhoneInput(e.target.value) })}
-            required
-          />
-          <input
-            type="text"
-            placeholder="Dirección"
-            value={form.address}
-            onChange={(e) => setForm({ ...form, address: e.target.value })}
-          />
-          <input
-            type="text"
-            placeholder="Ciudad"
-            value={form.city}
-            onChange={(e) => setForm({ ...form, city: e.target.value })}
-          />
-          <input
-            type="text"
-            placeholder="Comuna"
-            value={form.comuna}
-            onChange={(e) => setForm({ ...form, comuna: e.target.value })}
-          />
-          <input
-            type="text"
-            placeholder="Código postal"
-            value={form.postalCode || ''}
-            onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Latitud domicilio"
-              value={form.patientAddressLatitude ?? ''}
-              onChange={(e) => setForm({ ...form, patientAddressLatitude: e.target.value })}
-            />
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Longitud domicilio"
-              value={form.patientAddressLongitude ?? ''}
-              onChange={(e) => setForm({ ...form, patientAddressLongitude: e.target.value })}
-            />
-          </div>
-          <p style={{ marginTop: '-8px', color: '#59708a', fontSize: '0.88rem' }}>Opcional: si agregas latitud/longitud, la validación GPS confirmará llegada dentro de 100 metros del domicilio del paciente.</p>
-          <button type="submit" className="btn-success">{editing ? 'Actualizar' : 'Guardar'}</button>
-        </form>
-      )}
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Número</th>
-            <th>Nombre</th>
-            <th>Apellido</th>
-            <th>Fecha Nacimiento</th>
-            <th>Creado</th>
-            <th>Teléfono</th>
-            <th>Dirección</th>
-            <th>Ciudad</th>
-            <th>Comuna</th>
-            <th>Profesionales asignados</th>
-            {user && user.role === 'admin' && <th>Acciones</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {paginatedPatients.map((p) => (
-            <tr key={p.id}>
-              <td>{p.rut}</td>
-              <td>{p.firstName}</td>
-              <td>{p.lastName}</td>
-              <td>{formatDate(p.birthDate)}</td>
-              <td>{formatDate(p.createdAt)}</td>
-              <td>{p.phone}</td>
-              <td>{p.address}</td>
-              <td>{p.city}</td>
-              <td>{p.comuna || p.state || ''}</td>
-              <td>
-                {assignedProfessionalsByPatient[p.id]?.length > 0 ? (
-                  assignedProfessionalsByPatient[p.id].map((professional) => (
-                    <div key={professional.id} style={{ fontSize: '0.85rem', marginBottom: '4px' }}>
-                      {professional.firstName} {professional.lastName} ({professional.role || 'Sin categoría'})
-                    </div>
-                  ))
-                ) : (
-                  <span style={{ color: '#777', fontSize: '0.85rem' }}>Sin asignaciones</span>
-                )}
-              </td>
-              {user && user.role === 'admin' && (
-                <td>
-                  <>
-                    <button className="btn-secondary" onClick={() => startScheduling(p)}>Agendar</button>
-                    <button className="btn-primary" onClick={() => openProfessionalManager(p)}>Profesionales</button>
-                    <button className="btn-primary" onClick={() => handleEdit(p)}>Editar</button>
-                    <button className="btn-danger" onClick={() => handleDelete(p.id)}>Eliminar</button>
-                  </>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '12px' }}>
-        <span style={{ color: '#526a85', fontSize: '0.95rem' }}>
-          Mostrando {Math.min((currentPage - 1) * PAGE_SIZE + 1, patients.length)}-{Math.min(currentPage * PAGE_SIZE, patients.length)} de {patients.length} pacientes
-        </span>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))} disabled={currentPage === 1}>
-            Anterior
-          </button>
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
-            <button
-              key={page}
-              type="button"
-              className={page === currentPage ? 'btn-primary' : 'btn-secondary'}
-              onClick={() => setCurrentPage(page)}
-              style={{ minWidth: '42px' }}
-            >
-              {page}
-            </button>
-          ))}
-          <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
-            Siguiente
-          </button>
-        </div>
-      </div>
+      <PatientModal
+        open={showForm}
+        onClose={() => { setShowForm(false); resetForm(); }}
+        form={form}
+        setForm={setForm}
+        editing={editing}
+        onSubmit={handleSubmit}
+        formatPhoneInput={formatPhoneInput}
+        formatRutInput={formatRutInput}
+        formatInputToDate={formatInputToDate}
+        validatePatientForm={validatePatientForm}
+      />
 
       {managingPatient && (
         <PatientProfessionalManager
