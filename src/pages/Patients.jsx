@@ -63,7 +63,10 @@ export default function Patients() {
     phone: '',
     address: '',
     city: '',
-    comuna: ''
+    comuna: '',
+    postalCode: '',
+    patientAddressLatitude: '',
+    patientAddressLongitude: ''
   });
   const [professionals, setProfessionals] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -239,7 +242,10 @@ export default function Patients() {
       phone: '',
       address: '',
       city: '',
-      comuna: ''
+      comuna: '',
+      postalCode: '',
+      patientAddressLatitude: '',
+      patientAddressLongitude: ''
     });
   };
 
@@ -328,6 +334,14 @@ export default function Patients() {
       return;
     }
 
+    const latitudeValue = form.patientAddressLatitude === '' ? null : Number(form.patientAddressLatitude);
+    const longitudeValue = form.patientAddressLongitude === '' ? null : Number(form.patientAddressLongitude);
+
+    if ((form.patientAddressLatitude !== '' && Number.isNaN(latitudeValue)) || (form.patientAddressLongitude !== '' && Number.isNaN(longitudeValue))) {
+      setStatusMessage({ type: 'error', text: 'Las coordenadas del domicilio deben ser números válidos.' });
+      return;
+    }
+
     try {
       const payload = {
         rut: form.rut.trim(),
@@ -338,7 +352,9 @@ export default function Patients() {
         address: form.address.trim(),
         city: form.city.trim(),
         state: form.comuna?.trim() || '',
-        postalCode: form.postalCode?.trim() || ''
+        postalCode: form.postalCode?.trim() || '',
+        patientAddressLatitude: latitudeValue,
+        patientAddressLongitude: longitudeValue
       };
 
       if (editing) {
@@ -376,7 +392,10 @@ export default function Patients() {
       phone: patient.phone,
       address: patient.address || '',
       city: patient.city || '',
-      comuna: patient.comuna || patient.state || ''
+      comuna: patient.comuna || patient.state || '',
+      postalCode: patient.postalCode || '',
+      patientAddressLatitude: patient.patientAddressLatitude ?? '',
+      patientAddressLongitude: patient.patientAddressLongitude ?? ''
     });
     setShowForm(true);
   };
@@ -716,6 +735,29 @@ export default function Patients() {
             value={form.comuna}
             onChange={(e) => setForm({ ...form, comuna: e.target.value })}
           />
+          <input
+            type="text"
+            placeholder="Código postal"
+            value={form.postalCode || ''}
+            onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <input
+              type="number"
+              step="0.000001"
+              placeholder="Latitud domicilio"
+              value={form.patientAddressLatitude ?? ''}
+              onChange={(e) => setForm({ ...form, patientAddressLatitude: e.target.value })}
+            />
+            <input
+              type="number"
+              step="0.000001"
+              placeholder="Longitud domicilio"
+              value={form.patientAddressLongitude ?? ''}
+              onChange={(e) => setForm({ ...form, patientAddressLongitude: e.target.value })}
+            />
+          </div>
+          <p style={{ marginTop: '-8px', color: '#59708a', fontSize: '0.88rem' }}>Opcional: si agregas latitud/longitud, la validación GPS confirmará llegada dentro de 100 metros del domicilio del paciente.</p>
           <button type="submit" className="btn-success">{editing ? 'Actualizar' : 'Guardar'}</button>
         </form>
       )}
@@ -729,6 +771,7 @@ export default function Patients() {
             <th>Fecha Nacimiento</th>
             <th>Creado</th>
             <th>Teléfono</th>
+            <th>Dirección</th>
             <th>Ciudad</th>
             <th>Comuna</th>
             <th>Profesionales asignados</th>
@@ -744,6 +787,7 @@ export default function Patients() {
               <td>{formatDate(p.birthDate)}</td>
               <td>{formatDate(p.createdAt)}</td>
               <td>{p.phone}</td>
+              <td>{p.address}</td>
               <td>{p.city}</td>
               <td>{p.comuna || p.state || ''}</td>
               <td>

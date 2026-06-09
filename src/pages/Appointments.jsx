@@ -78,11 +78,6 @@ export default function Appointments() {
     }
   }, [currentPage, totalPages]);
 
-  useEffect(() => {
-    // Check permission status on mount
-    checkGpsPermission();
-  }, []);
-
   const pageAppointments = sortedAppointments.slice((currentPage - 1) * APPOINTMENTS_PER_PAGE, currentPage * APPOINTMENTS_PER_PAGE);
 
   const resetForm = () => {
@@ -141,19 +136,47 @@ export default function Appointments() {
   const [gpsMessage, setGpsMessage] = useState('');
   const [gpsLoadingId, setGpsLoadingId] = useState(null);
   const [gpsPermission, setGpsPermission] = useState('unknown'); // 'granted' | 'denied' | 'prompt' | 'unsupported' | 'unknown'
+  const [gpsValidation, setGpsValidation] = useState({});
 
-  const checkGpsPermission = async () => {
-    if (!navigator.permissions) {
-      setGpsPermission('unsupported');
-      return;
+  const updateGpsValidation = (id, updates) => {
+    setGpsValidation((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        ...updates
+      }
+    }));
+  };
+
+  const clearGpsValidation = (id) => {
+    setGpsValidation((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const getPatientAddressLabel = (appointment) => {
+    if (appointment.patientAddress) {
+      return `${appointment.patientAddress}${appointment.patientCity ? ', ' + appointment.patientCity : ''}${appointment.patientState ? ' / ' + appointment.patientState : ''}`.trim();
     }
-    try {
-      const status = await navigator.permissions.query({ name: 'geolocation' });
-      setGpsPermission(status.state);
-      status.onchange = () => setGpsPermission(status.state);
-    } catch (e) {
-      setGpsPermission('unsupported');
+    if (appointment.patientCity || appointment.patientState) {
+      return `${appointment.patientCity || ''}${appointment.patientCity && appointment.patientState ? ', ' : ''}${appointment.patientState || ''}`.trim();
     }
+    return '';
+  };
+
+  const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
+    const toRad = (value) => (value * Math.PI) / 180;
+    const R = 6371000; // Earth radius in meters
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   };
 
   const handleDelete = async (id) => {
@@ -168,22 +191,37 @@ export default function Appointments() {
   };
 
   const handleRegisterGps = async (id, eventType = 'arrival') => {
+    const appointment = appointments.find((appt) => appt.id === id);
+    const patientAddressLabel = appointment ? getPatientAddressLabel(appointment) : '';
+
     if (!navigator.geolocation) {
       setGpsMessage('Geolocalización no está disponible en este navegador');
       return;
     }
 
-    // If permission is known denied, avoid triggering prompt and show guidance
-    if (gpsPermission === 'denied') {
-      setGpsMessage('Permiso denegado para geolocalización. Revisa los permisos del sitio en tu navegador o en la configuración del sistema, luego pulsa Reintentar.');
-      return;
-    }
-
-    setGpsMessage('Obteniendo ubicación...');
+    setGpsMessage(`Validando llegada al punto de atención${patientAddressLabel ? `: ${patientAddressLabel}` : ''}`);
     setGpsLoadingId(id);
+    updateGpsValidation(id, { progress: 0, validating: true, message: 'Iniciando validación...', targetAddress: patientAddressLabel });
+
+    const progressInterval = setInterval(() => {
+      setGpsValidation((prev) => {
+        const current = prev[id] || {};
+        const nextProgress = Math.min(100, (current.progress || 0) + 15);
+        return {
+          ...prev,
+          [id]: {
+            ...current,
+            progress: nextProgress,
+            validating: true,
+            message: 'Validando llegada...'
+          }
+        };
+      });
+    }, 250);
 
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
+        clearInterval(progressInterval);
         try {
           await registerAppointmentGpsEvent(id, {
             latitude: coords.latitude,
@@ -192,27 +230,54 @@ export default function Appointments() {
             timestamp: new Date().toISOString(),
             notes: `Registro GPS ${eventType} desde frontend`
           });
-          setGpsMessage(`Evento GPS ${eventType} registrado: ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`);
+
+          const patientCoordsAvailable = Number.isFinite(Number(appointment?.patientAddressLatitude)) && Number.isFinite(Number(appointment?.patientAddressLongitude));
+          let validationMessage = `Evento GPS ${eventType} registrado: ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
+
+          if (eventType === 'arrival') {
+            if (patientAddressLabel) {
+              if (patientCoordsAvailable) {
+                const distanceMeters = getDistanceFromLatLonInMeters(
+                  coords.latitude,
+                  coords.longitude,
+                  Number(appointment.patientAddressLatitude),
+                  Number(appointment.patientAddressLongitude)
+                );
+                validationMessage = distanceMeters <= 100
+                  ? `Llegada validada dentro del radio de 100 m del domicilio del paciente (${distanceMeters.toFixed(0)} m).`
+                  : `Ubicación registrada, pero estás a ${distanceMeters.toFixed(0)} m del domicilio del paciente (radio permitido: 100 m).`;
+              } else {
+                validationMessage = `Llegada registrada. Direccion de referencia: ${patientAddressLabel}.`;
+              }
+            }
+          }
+
+          setGpsMessage(validationMessage);
+          updateGpsValidation(id, { progress: 100, validating: false, message: validationMessage, result: 'completed' });
           fetchAppointments();
         } catch (err) {
           console.error('Error:', err);
           setGpsMessage('Error al registrar la ubicación GPS');
+          updateGpsValidation(id, { progress: 100, validating: false, message: 'Error al registrar la ubicación GPS', result: 'error' });
         } finally {
           setGpsLoadingId(null);
-          checkGpsPermission();
+          setTimeout(() => clearGpsValidation(id), 4000);
         }
       },
       (error) => {
         console.error('Geolocation error:', error);
+        clearInterval(progressInterval);
+        let errorMessage = 'Error al obtener la ubicación GPS';
         if (error.code === 1) {
-          setGpsMessage('Permiso denegado para geolocalización');
+          setGpsPermission('denied');
+          errorMessage = 'Permiso denegado para geolocalización';
         } else if (error.code === 2) {
-          setGpsMessage('No se pudo obtener la ubicación');
-        } else {
-          setGpsMessage('Error al obtener la ubicación GPS');
+          errorMessage = 'No se pudo obtener la ubicación';
         }
+        setGpsMessage(errorMessage);
+        updateGpsValidation(id, { progress: 100, validating: false, message: errorMessage, result: 'error' });
         setGpsLoadingId(null);
-        checkGpsPermission();
+        setTimeout(() => clearGpsValidation(id), 4000);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -247,6 +312,34 @@ export default function Appointments() {
     return 'Fecha inválida';
   };
 
+  const getAppointmentAttendanceLogs = (appointment) => {
+    const logs = [];
+
+    if (appointment.arrivalLatitude && appointment.arrivalLongitude) {
+      logs.push({
+        id: 'arrival',
+        label: 'Llegada',
+        timestamp: appointment.arrivalTimestamp,
+        latitude: appointment.arrivalLatitude,
+        longitude: appointment.arrivalLongitude,
+        notes: appointment.gpsEventType === 'arrival' ? appointment.gpsNotes : appointment.gpsNotes
+      });
+    }
+
+    if (appointment.startLatitude && appointment.startLongitude) {
+      logs.push({
+        id: 'start',
+        label: 'Inicio',
+        timestamp: appointment.startTimestamp,
+        latitude: appointment.startLatitude,
+        longitude: appointment.startLongitude,
+        notes: appointment.gpsEventType === 'start' ? appointment.gpsNotes : appointment.gpsNotes
+      });
+    }
+
+    return logs;
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -269,7 +362,7 @@ export default function Appointments() {
           <div style={{ marginBottom: '6px' }}>{gpsMessage}</div>
           {gpsPermission === 'denied' && (
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn-secondary" onClick={() => window.location.reload()}>Reintentar</button>
+              <button className="btn-secondary" onClick={() => setGpsMessage('')}>Reintentar</button>
               <a href="#" onClick={(e) => { e.preventDefault(); alert('Abre la configuración de tu navegador y permite el uso de la ubicación para este sitio (o usa HTTPS/localhost).'); }} style={{ color: '#0645AD', textDecoration: 'underline', alignSelf: 'center' }}>¿Cómo permito la ubicación?</a>
             </div>
           )}
@@ -350,13 +443,15 @@ export default function Appointments() {
           </div>
         ) : (
           <>
-            {pageAppointments.map((appointment) => (
-              <div className="appointment-card" key={appointment.id}>
-                <div className="card-header">
-                  <div>
-                    <h3>{formatAppointmentDateTime(appointment.appointmentDate, appointment.appointmentTime)}</h3>
-                    <p>{appointment.patientName} {appointment.patientLastName}</p>
-                  </div>
+            {pageAppointments.map((appointment) => {
+              const appointmentLogs = getAppointmentAttendanceLogs(appointment);
+              return (
+                <div className="appointment-card" key={appointment.id}>
+                  <div className="card-header">
+                    <div>
+                      <h3>{formatAppointmentDateTime(appointment.appointmentDate, appointment.appointmentTime)}</h3>
+                      <p>{appointment.patientName} {appointment.patientLastName}</p>
+                    </div>
                   <span className={`status-badge status-${appointment.status}`}>{appointment.status === 'scheduled' ? 'Agendada' : appointment.status === 'completed' ? 'Completada' : 'Cancelada'}</span>
                 </div>
 
@@ -373,6 +468,12 @@ export default function Appointments() {
                 <strong>Motivo:</strong>
                 <span>{appointment.reason || '-'}</span>
               </div>
+              {appointment.patientAddress && (
+                <div className="card-row">
+                  <strong>Dirección paciente:</strong>
+                  <span>{getPatientAddressLabel(appointment)}</span>
+                </div>
+              )}
               {/* Mostrar coordenadas si existen (útil para admin verificar llegada) */}
               {appointment.arrivalLatitude && appointment.arrivalLongitude && (
                 <div className="card-row">
@@ -401,9 +502,37 @@ export default function Appointments() {
 
             <div className="card-section">
               <h4>Registros de la Atención</h4>
-              <p>No hay registros cargados aún.</p>
-              <button className="btn-secondary" type="button">Agregar registro</button>
+              {appointmentLogs.length === 0 ? (
+                <>
+                  <p>No hay registros cargados aún.</p>
+                  <button className="btn-secondary" type="button">Agregar registro</button>
+                </>
+              ) : (
+                <div className="attendance-logs">
+                  {appointmentLogs.map((log) => (
+                    <div key={log.id} className="attendance-log-row">
+                      <div>
+                        <strong>{log.label}</strong>
+                        <div>{log.timestamp ? new Date(log.timestamp).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'Fecha no disponible'}</div>
+                      </div>
+                      <div>
+                        {Number(log.latitude).toFixed(6)}, {Number(log.longitude).toFixed(6)}
+                      </div>
+                      {log.notes && <div className="log-notes">{log.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {gpsValidation[appointment.id] && (
+              <div className="gps-validation-panel" style={{ marginBottom: '1rem' }}>
+                <div style={{ marginBottom: '8px', fontSize: '0.95rem' }}>{gpsValidation[appointment.id].message}</div>
+                <div style={{ background: '#e6f7ff', borderRadius: '10px', overflow: 'hidden', height: '10px' }}>
+                  <div style={{ width: `${gpsValidation[appointment.id].progress}%`, height: '100%', background: '#38a169', transition: 'width 0.2s ease' }} />
+                </div>
+              </div>
+            )}
 
             <div className="card-actions">
               {/* Edit/Delete sólo para admin */}
@@ -426,7 +555,8 @@ export default function Appointments() {
               )}
             </div>
           </div>
-            ))}
+                );
+              })}
           </>
         )}
       </div>

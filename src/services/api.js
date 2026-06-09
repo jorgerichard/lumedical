@@ -40,6 +40,7 @@ export const getProfile = () => API.get('/auth/profile');
 export const getPatients = () => API.get('/patients');
 export const createPatient = (data) => API.post('/patients', data);
 export const updatePatient = (id, data) => API.put(`/patients/${id}`, data);
+export const updatePatientAddressCoordinates = (patientId, latitude, longitude) => API.put(`/patients/${patientId}/address-coordinates`, { latitude, longitude });
 export const deletePatient = (id) => API.delete(`/patients/${id}`);
 export const searchPatients = (query) => API.get(`/patients/search?query=${encodeURIComponent(query)}`);
 
