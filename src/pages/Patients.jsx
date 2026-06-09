@@ -79,6 +79,8 @@ export default function Patients() {
   const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
   const [managingPatient, setManagingPatient] = useState(null);
   const [previousCategoryFilter, setPreviousCategoryFilter] = useState('todo');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 5;
 
   const professionalCategories = [
     { value: 'todo', label: 'Todas' },
@@ -134,6 +136,7 @@ export default function Patients() {
           }))
         : [];
       setPatients(normalizedPatients);
+      setCurrentPage(1);
       setStatusMessage({ type: '', text: '' });
     } catch (err) {
       console.error('Error al cargar pacientes:', err.response?.data || err.message);
@@ -219,6 +222,7 @@ export default function Patients() {
           }))
         : [];
       setPatients(normalizedPatients);
+      setCurrentPage(1);
       setStatusMessage({ type: '', text: '' });
     } catch (err) {
       console.error('Error buscando pacientes:', err.response?.data || err.message);
@@ -262,6 +266,15 @@ export default function Patients() {
     setAppointmentForm({ professionalId: '', appointmentDate: '', appointmentTime: '', reason: '' });
     setCategoryFilter(previousCategoryFilter);
   };
+
+  const totalPages = Math.max(1, Math.ceil(patients.length / PAGE_SIZE));
+  const paginatedPatients = patients.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
 
   const assignedProfessionalsByPatient = professionalAssignments.reduce((acc, { professional, patients }) => {
     patients.forEach((patient) => {
@@ -779,7 +792,7 @@ export default function Patients() {
           </tr>
         </thead>
         <tbody>
-          {patients.map((p) => (
+          {paginatedPatients.map((p) => (
             <tr key={p.id}>
               <td>{p.rut}</td>
               <td>{p.firstName}</td>
@@ -815,6 +828,31 @@ export default function Patients() {
           ))}
         </tbody>
       </table>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '12px' }}>
+        <span style={{ color: '#526a85', fontSize: '0.95rem' }}>
+          Mostrando {Math.min((currentPage - 1) * PAGE_SIZE + 1, patients.length)}-{Math.min(currentPage * PAGE_SIZE, patients.length)} de {patients.length} pacientes
+        </span>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))} disabled={currentPage === 1}>
+            Anterior
+          </button>
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+            <button
+              key={page}
+              type="button"
+              className={page === currentPage ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setCurrentPage(page)}
+              style={{ minWidth: '42px' }}
+            >
+              {page}
+            </button>
+          ))}
+          <button type="button" className="btn-secondary" onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
+            Siguiente
+          </button>
+        </div>
+      </div>
 
       {managingPatient && (
         <PatientProfessionalManager

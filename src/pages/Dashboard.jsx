@@ -165,7 +165,7 @@ export default function Dashboard() {
           <button onClick={() => navigate('/calendar')}>Calendario</button>
           <button onClick={() => navigate('/appointments')}>Citas</button>
           <button onClick={() => navigate('/patients')}>Pacientes</button>
-          <button onClick={() => navigate('/reports')}>Reportes</button>
+          {user?.role === 'admin' && <button onClick={() => navigate('/reports')}>Reportes</button>}
         </div>
       </div>
 
