@@ -127,29 +127,9 @@ export default function PatientModal({
             value={form.comuna}
             onChange={(e) => setForm({ ...form, comuna: e.target.value })}
           />
-          <input
-            type="text"
-            placeholder="Código postal"
-            value={form.postalCode || ''}
-            onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Latitud domicilio"
-              value={form.patientAddressLatitude ?? ''}
-              onChange={(e) => setForm({ ...form, patientAddressLatitude: e.target.value })}
-            />
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Longitud domicilio"
-              value={form.patientAddressLongitude ?? ''}
-              onChange={(e) => setForm({ ...form, patientAddressLongitude: e.target.value })}
-            />
-          </div>
-          <p style={{ marginTop: '-8px', color: '#59708a', fontSize: '0.88rem' }}>Opcional: si agregas latitud/longitud, la validación GPS confirmará llegada dentro de 100 metros del domicilio del paciente.</p>
+          <p style={{ marginTop: '-8px', color: '#59708a', fontSize: '0.92rem' }}>
+            Sugerencia: el GPS se obtendrá desde la dirección cuando esté habilitado, sin pedir coordenadas manuales al usuario.
+          </p>
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
             <button type="button" className="btn-secondary" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn-success">{editing ? 'Actualizar' : 'Guardar'}</button>

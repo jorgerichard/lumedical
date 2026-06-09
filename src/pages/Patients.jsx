@@ -83,6 +83,13 @@ export default function Patients() {
   const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
   const [managingPatient, setManagingPatient] = useState(null);
   const [activeTab, setActiveTab] = useState('patients');
+  const [scheduleTabForm, setScheduleTabForm] = useState({
+    patientId: '',
+    professionalId: '',
+    appointmentDate: new Date().toISOString().split('T')[0],
+    appointmentTime: '09:00',
+    reason: ''
+  });
   const [previousCategoryFilter, setPreviousCategoryFilter] = useState('todo');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 5;
@@ -313,6 +320,38 @@ export default function Patients() {
       return group;
     }, {});
 
+  const handleScheduleTabSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!scheduleTabForm.patientId || !scheduleTabForm.professionalId || !scheduleTabForm.appointmentDate || !scheduleTabForm.appointmentTime || !scheduleTabForm.reason) {
+      setStatusMessage({ type: 'error', text: 'Completa paciente, profesional, fecha, hora y motivo para agendar.' });
+      return;
+    }
+
+    try {
+      await createAppointment({
+        patientId: scheduleTabForm.patientId,
+        professionalId: scheduleTabForm.professionalId,
+        appointmentDate: scheduleTabForm.appointmentDate,
+        appointmentTime: scheduleTabForm.appointmentTime,
+        reason: scheduleTabForm.reason
+      });
+      setStatusMessage({ type: 'success', text: 'Cita creada correctamente.' });
+      setScheduleTabForm({
+        patientId: '',
+        professionalId: '',
+        appointmentDate: new Date().toISOString().split('T')[0],
+        appointmentTime: '09:00',
+        reason: ''
+      });
+      fetchAppointments();
+      fetchProfessionalAssignments();
+    } catch (err) {
+      console.error('Error creando cita desde la pestaña:', err);
+      setStatusMessage({ type: 'error', text: err.response?.data?.mensaje || 'No se pudo crear la cita.' });
+    }
+  };
+
   const handleAppointmentSubmit = async (e) => {
     e.preventDefault();
     if (!appointmentForm.professionalId || !appointmentForm.appointmentDate || !appointmentForm.appointmentTime || !appointmentForm.reason) {
@@ -356,14 +395,6 @@ export default function Patients() {
       return;
     }
 
-    const latitudeValue = form.patientAddressLatitude === '' ? null : Number(form.patientAddressLatitude);
-    const longitudeValue = form.patientAddressLongitude === '' ? null : Number(form.patientAddressLongitude);
-
-    if ((form.patientAddressLatitude !== '' && Number.isNaN(latitudeValue)) || (form.patientAddressLongitude !== '' && Number.isNaN(longitudeValue))) {
-      setStatusMessage({ type: 'error', text: 'Las coordenadas del domicilio deben ser números válidos.' });
-      return;
-    }
-
     try {
       const payload = {
         rut: form.rut.trim(),
@@ -373,10 +404,7 @@ export default function Patients() {
         phone: form.phone.trim(),
         address: form.address.trim(),
         city: form.city.trim(),
-        state: form.comuna?.trim() || '',
-        postalCode: form.postalCode?.trim() || '',
-        patientAddressLatitude: latitudeValue,
-        patientAddressLongitude: longitudeValue
+        state: form.comuna?.trim() || ''
       };
 
       if (editing) {
@@ -458,6 +486,7 @@ export default function Patients() {
       <div className="tab-switcher" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
         <button type="button" className={activeTab === 'patients' ? 'btn-primary' : 'btn-secondary'} onClick={() => setActiveTab('patients')}>Listado de pacientes</button>
         <button type="button" className={activeTab === 'assignments' ? 'btn-primary' : 'btn-secondary'} onClick={() => setActiveTab('assignments')}>Asignaciones</button>
+        <button type="button" className={activeTab === 'schedule' ? 'btn-primary' : 'btn-secondary'} onClick={() => setActiveTab('schedule')}>Agendar paciente</button>
       </div>
 
       <div className="schedule-summary" style={{ marginBottom: '20px' }}>
@@ -591,6 +620,81 @@ export default function Patients() {
           selectedProfessionalId={selectedAssignmentProfessionalId}
           onSelectProfessional={setSelectedAssignmentProfessionalId}
         />
+      )}
+
+      {activeTab === 'schedule' && (
+        <section className="card-section" style={{ marginTop: '8px' }}>
+          <div style={{ display: 'grid', gap: '12px' }}>
+            <div>
+              <h3 style={{ marginBottom: '6px' }}>Agendar paciente</h3>
+              <p style={{ margin: 0, color: '#526a85' }}>Crea una cita directamente desde esta pestaña, sin depender del formulario de asignación.</p>
+            </div>
+            <form onSubmit={handleScheduleTabSubmit} style={{ display: 'grid', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '700', color: '#102a43' }}>Paciente</label>
+                <select
+                  value={scheduleTabForm.patientId}
+                  onChange={(e) => setScheduleTabForm({ ...scheduleTabForm, patientId: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #d9e2ec', background: '#f6f9fc' }}
+                >
+                  <option value="">Selecciona un paciente</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>{patient.firstName} {patient.lastName} — {patient.rut}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '700', color: '#102a43' }}>Profesional</label>
+                <select
+                  value={scheduleTabForm.professionalId}
+                  onChange={(e) => setScheduleTabForm({ ...scheduleTabForm, professionalId: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #d9e2ec', background: '#f6f9fc' }}
+                >
+                  <option value="">Selecciona un profesional</option>
+                  {professionals.map((professional) => (
+                    <option key={professional.id} value={professional.id}>{professional.firstName} {professional.lastName} ({professional.role || 'Sin categoría'})</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: '700', color: '#102a43' }}>Fecha</label>
+                  <input
+                    type="date"
+                    value={scheduleTabForm.appointmentDate}
+                    onChange={(e) => setScheduleTabForm({ ...scheduleTabForm, appointmentDate: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #d9e2ec', background: '#f6f9fc' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: '700', color: '#102a43' }}>Hora</label>
+                  <input
+                    type="time"
+                    value={scheduleTabForm.appointmentTime}
+                    onChange={(e) => setScheduleTabForm({ ...scheduleTabForm, appointmentTime: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #d9e2ec', background: '#f6f9fc' }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '700', color: '#102a43' }}>Motivo</label>
+                <input
+                  type="text"
+                  placeholder="Ej: Consulta general"
+                  value={scheduleTabForm.reason}
+                  onChange={(e) => setScheduleTabForm({ ...scheduleTabForm, reason: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #d9e2ec', background: '#f6f9fc' }}
+                />
+              </div>
+              <button type="submit" className="btn-success">Confirmar agendamiento</button>
+            </form>
+          </div>
+        </section>
       )}
 
       {schedulingPatient && (
